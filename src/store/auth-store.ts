@@ -1,7 +1,7 @@
 'use client';
 
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { persist, createJSONStorage } from 'zustand/middleware';
 
 export interface User {
   id: string;
@@ -22,35 +22,51 @@ interface AuthState {
   setInitialized: (initialized: boolean) => void;
 }
 
+// Use a module-level variable to prevent re-fetching across renders
+let hasInitialized = false;
+
 export const useAuthStore = create<AuthState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       user: null,
       isLoading: true,
       initialized: false,
       setUser: (user) => set({ user, isLoading: false }),
       setLoading: (loading) => set({ isLoading: loading }),
-      logout: () => set({ user: null, isLoading: false, initialized: false }),
-      setInitialized: (initialized) => set({ initialized })
+      logout: () => {
+        hasInitialized = false;
+        set({ user: null, isLoading: false, initialized: false });
+      },
+      setInitialized: (initialized) => {
+        hasInitialized = initialized;
+        set({ initialized });
+      }
     }),
     {
       name: 'senseimath-auth',
-      partialize: (state) => ({ user: state.user })
+      storage: createJSONStorage(() => localStorage),
+      partialize: (state) => ({ user: state.user }),
+      onRehydrateStorage: () => (state) => {
+        // After rehydration, check if we already have a user
+        if (state?.user) {
+          hasInitialized = true;
+          state.setInitialized(true);
+          state.setLoading(false);
+        }
+      }
     }
   )
 );
 
-// Hook to fetch current user - with protection against infinite loops
-let isFetching = false;
-
+// Hook to fetch current user
 export function useAuth() {
   const { user, isLoading, initialized, setUser, setLoading, logout, setInitialized } = useAuthStore();
 
   const fetchUser = async () => {
-    // Защита от множественных одновременных запросов
-    if (isFetching || initialized) return;
+    // Prevent multiple fetches
+    if (hasInitialized) return;
     
-    isFetching = true;
+    hasInitialized = true;
     setLoading(true);
     
     try {
@@ -64,7 +80,6 @@ export function useAuth() {
     } catch {
       setUser(null);
     } finally {
-      isFetching = false;
       setInitialized(true);
     }
   };
