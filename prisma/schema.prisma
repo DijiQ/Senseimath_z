@@ -1,0 +1,129 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  username      String   @unique
+  password      String
+  name          String?
+  role          Role     @default(STUDENT)
+  avatar        String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  // Relations
+  lessonsAsTutor     Lesson[]           @relation("TutorLessons")
+  lessonsAsStudent   LessonStudent[]
+  tutorRequests      TutorRequest[]
+  studentRequests    TutorRequest[]     @relation("StudentRequests")
+  notifications      Notification[]
+  uploadedFiles      LessonFile[]
+}
+
+enum Role {
+  TUTOR
+  STUDENT
+}
+
+model TutorRequest {
+  id          String      @id @default(cuid())
+  tutorId     String
+  studentId   String
+  status      RequestStatus @default(PENDING)
+  createdAt   DateTime    @default(now())
+  
+  tutor       User        @relation(fields: [tutorId], references: [id])
+  student     User        @relation("StudentRequests", fields: [studentId], references: [id])
+  
+  @@unique([tutorId, studentId])
+}
+
+enum RequestStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+}
+
+model Lesson {
+  id          String   @id @default(cuid())
+  tutorId     String
+  title       String
+  description String?
+  date        DateTime
+  duration    Int      @default(60) // minutes
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  tutor       User             @relation("TutorLessons", fields: [tutorId], references: [id])
+  students    LessonStudent[]
+  files       LessonFile[]
+  whiteboard  WhiteboardState?
+}
+
+model LessonStudent {
+  id        String   @id @default(cuid())
+  lessonId  String
+  studentId String
+  
+  lesson    Lesson   @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  student   User     @relation(fields: [studentId], references: [id])
+  
+  @@unique([lessonId, studentId])
+}
+
+model LessonFile {
+  id           String   @id @default(cuid())
+  lessonId     String
+  uploaderId   String
+  filename     String
+  originalName String
+  mimeType     String
+  size         Int
+  path         String
+  createdAt    DateTime @default(now())
+  
+  lesson       Lesson   @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  uploader     User     @relation(fields: [uploaderId], references: [id])
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  type      NotificationType
+  title     String
+  message   String
+  data      String? // JSON for additional data
+  read      Boolean          @default(false)
+  createdAt DateTime          @default(now())
+  
+  user      User             @relation(fields: [userId], references: [id])
+}
+
+enum NotificationType {
+  NEW_LESSON
+  LESSON_CANCELLED
+  LESSON_RESCHEDULED
+  TUTOR_INVITE
+  INVITE_ACCEPTED
+  INVITE_DECLINED
+  NEW_FILE
+}
+
+model WhiteboardState {
+  id        String   @id @default(cuid())
+  lessonId  String   @unique
+  data      String   // JSON with drawing data
+  updatedAt DateTime @updatedAt
+  
+  lesson    Lesson   @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+}
