@@ -6,28 +6,28 @@ import { useAuth } from '@/store/auth-store';
 import { Loader2 } from 'lucide-react';
 
 export default function DashboardPage() {
-  const { user, hasCheckedAuth, fetchUser } = useAuth();
+  const { user, initialized, fetchUser } = useAuth();
   const router = useRouter();
   const [authChecked, setAuthChecked] = useState(false);
 
   useEffect(() => {
-    if (!hasCheckedAuth && !authChecked) {
+    if (!initialized && !authChecked) {
       setAuthChecked(true);
       fetchUser();
     }
-  }, [hasCheckedAuth, authChecked, fetchUser]);
+  }, [initialized, authChecked, fetchUser]);
 
   useEffect(() => {
-    if (hasCheckedAuth && !user) {
+    if (initialized && !user) {
       router.push('/auth/login');
-    } else if (hasCheckedAuth && user) {
+    } else if (initialized && user) {
       if (user.role === 'TUTOR') {
         router.push('/tutor');
       } else {
         router.push('/student');
       }
     }
-  }, [user, hasCheckedAuth, router]);
+  }, [user, initialized, router]);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-emerald-50 via-white to-teal-50">

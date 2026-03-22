@@ -15,11 +15,11 @@ export interface User {
 interface AuthState {
   user: User | null;
   isLoading: boolean;
-  hasCheckedAuth: boolean;
+  initialized: boolean;
   setUser: (user: User | null) => void;
   setLoading: (loading: boolean) => void;
   logout: () => void;
-  setCheckedAuth: (checked: boolean) => void;
+  setInitialized: (initialized: boolean) => void;
 }
 
 export const useAuthStore = create<AuthState>()(
@@ -27,11 +27,11 @@ export const useAuthStore = create<AuthState>()(
     (set) => ({
       user: null,
       isLoading: true,
-      hasCheckedAuth: false,
+      initialized: false,
       setUser: (user) => set({ user, isLoading: false }),
       setLoading: (loading) => set({ isLoading: loading }),
-      logout: () => set({ user: null, isLoading: false, hasCheckedAuth: false }),
-      setCheckedAuth: (checked) => set({ hasCheckedAuth: checked })
+      logout: () => set({ user: null, isLoading: false, initialized: false }),
+      setInitialized: (initialized) => set({ initialized })
     }),
     {
       name: 'senseimath-auth',
@@ -40,15 +40,17 @@ export const useAuthStore = create<AuthState>()(
   )
 );
 
-// Hook to fetch current user
+// Hook to fetch current user - with protection against infinite loops
+let isFetching = false;
+
 export function useAuth() {
-  const { user, isLoading, hasCheckedAuth, setUser, setLoading, logout, setCheckedAuth } = useAuthStore();
+  const { user, isLoading, initialized, setUser, setLoading, logout, setInitialized } = useAuthStore();
 
   const fetchUser = async () => {
-    // Предотвращаем повторные запросы если уже проверили авторизацию
-    if (hasCheckedAuth) return;
+    // Защита от множественных одновременных запросов
+    if (isFetching || initialized) return;
     
-    setCheckedAuth(true);
+    isFetching = true;
     setLoading(true);
     
     try {
@@ -61,6 +63,9 @@ export function useAuth() {
       }
     } catch {
       setUser(null);
+    } finally {
+      isFetching = false;
+      setInitialized(true);
     }
   };
 
@@ -110,7 +115,7 @@ export function useAuth() {
   return {
     user,
     isLoading,
-    hasCheckedAuth,
+    initialized,
     fetchUser,
     login,
     register,

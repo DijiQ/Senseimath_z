@@ -69,7 +69,7 @@ interface Invitation {
 }
 
 export default function StudentPage() {
-  const { user, isLoading, hasCheckedAuth, fetchUser, logout } = useAuth();
+  const { user, isLoading, initialized, fetchUser, logout } = useAuth();
   const router = useRouter();
   
   const [activeTab, setActiveTab] = useState('schedule');
@@ -85,20 +85,20 @@ export default function StudentPage() {
 
   // Проверка авторизации только один раз
   useEffect(() => {
-    if (!hasCheckedAuth && !authChecked) {
+    if (!initialized && !authChecked) {
       setAuthChecked(true);
       fetchUser();
     }
-  }, [hasCheckedAuth, authChecked, fetchUser]);
+  }, [initialized, authChecked, fetchUser]);
 
   // Редирект если не авторизован или не ученик
   useEffect(() => {
-    if (hasCheckedAuth && !user) {
+    if (initialized && !user) {
       router.push('/auth/login');
-    } else if (hasCheckedAuth && user?.role !== 'STUDENT') {
+    } else if (initialized && user?.role !== 'STUDENT') {
       router.push('/dashboard');
     }
-  }, [user, hasCheckedAuth, router]);
+  }, [user, initialized, router]);
 
   const fetchData = useCallback(async () => {
     if (!user) return;

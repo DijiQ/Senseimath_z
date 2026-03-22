@@ -8,24 +8,24 @@ import { Button } from '@/components/ui/button';
 import { BookOpen, Users, Calendar, Palette, Bell, FileText } from 'lucide-react';
 
 export default function Home() {
-  const { user, hasCheckedAuth, fetchUser } = useAuth();
+  const { user, initialized, fetchUser } = useAuth();
   const router = useRouter();
   const [checked, setChecked] = useState(false);
 
   useEffect(() => {
     // Проверяем авторизацию только один раз при загрузке
-    if (!hasCheckedAuth && !checked) {
+    if (!initialized && !checked) {
       setChecked(true);
       fetchUser();
     }
-  }, [hasCheckedAuth, checked, fetchUser]);
+  }, [initialized, checked, fetchUser]);
 
   useEffect(() => {
     // Редирект если пользователь авторизован
-    if (hasCheckedAuth && user) {
+    if (initialized && user) {
       router.push('/dashboard');
     }
-  }, [user, hasCheckedAuth, router]);
+  }, [user, initialized, router]);
 
   const features = [
     {
