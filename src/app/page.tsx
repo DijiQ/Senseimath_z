@@ -1,25 +1,31 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuth } from '@/store/auth-store';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { BookOpen, Users, Calendar, Palette, Bell, FileText } from 'lucide-react';
 
 export default function Home() {
-  const { user, isLoading, fetchUser } = useAuth();
+  const { user, hasCheckedAuth, fetchUser } = useAuth();
   const router = useRouter();
+  const [checked, setChecked] = useState(false);
 
   useEffect(() => {
-    fetchUser();
-  }, [fetchUser]);
+    // Проверяем авторизацию только один раз при загрузке
+    if (!hasCheckedAuth && !checked) {
+      setChecked(true);
+      fetchUser();
+    }
+  }, [hasCheckedAuth, checked, fetchUser]);
 
   useEffect(() => {
-    if (!isLoading && user) {
+    // Редирект если пользователь авторизован
+    if (hasCheckedAuth && user) {
       router.push('/dashboard');
     }
-  }, [user, isLoading, router]);
+  }, [user, hasCheckedAuth, router]);
 
   const features = [
     {

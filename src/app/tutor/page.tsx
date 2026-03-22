@@ -55,7 +55,7 @@ interface Notification {
 }
 
 export default function TutorPage() {
-  const { user, isLoading, fetchUser, logout } = useAuth();
+  const { user, isLoading, hasCheckedAuth, fetchUser, logout } = useAuth();
   const router = useRouter();
   
   const [activeTab, setActiveTab] = useState('schedule');
@@ -67,6 +67,7 @@ export default function TutorPage() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [showNotifications, setShowNotifications] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [authChecked, setAuthChecked] = useState(false);
   
   // Form states
   const [showNewLesson, setShowNewLesson] = useState(false);
@@ -80,17 +81,22 @@ export default function TutorPage() {
   const [lessonDuration, setLessonDuration] = useState(60);
   const [selectedStudents, setSelectedStudents] = useState<string[]>([]);
 
+  // Проверка авторизации только один раз
   useEffect(() => {
-    fetchUser();
-  }, [fetchUser]);
+    if (!hasCheckedAuth && !authChecked) {
+      setAuthChecked(true);
+      fetchUser();
+    }
+  }, [hasCheckedAuth, authChecked, fetchUser]);
 
+  // Редирект если не авторизован или не репетитор
   useEffect(() => {
-    if (!isLoading && !user) {
+    if (hasCheckedAuth && !user) {
       router.push('/auth/login');
-    } else if (!isLoading && user?.role !== 'TUTOR') {
+    } else if (hasCheckedAuth && user?.role !== 'TUTOR') {
       router.push('/dashboard');
     }
-  }, [user, isLoading, router]);
+  }, [user, hasCheckedAuth, router]);
 
   const fetchData = useCallback(async () => {
     if (!user) return;

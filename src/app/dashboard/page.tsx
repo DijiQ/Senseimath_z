@@ -1,29 +1,33 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/store/auth-store';
 import { Loader2 } from 'lucide-react';
 
 export default function DashboardPage() {
-  const { user, isLoading, fetchUser } = useAuth();
+  const { user, hasCheckedAuth, fetchUser } = useAuth();
   const router = useRouter();
+  const [authChecked, setAuthChecked] = useState(false);
 
   useEffect(() => {
-    fetchUser();
-  }, [fetchUser]);
+    if (!hasCheckedAuth && !authChecked) {
+      setAuthChecked(true);
+      fetchUser();
+    }
+  }, [hasCheckedAuth, authChecked, fetchUser]);
 
   useEffect(() => {
-    if (!isLoading && !user) {
+    if (hasCheckedAuth && !user) {
       router.push('/auth/login');
-    } else if (!isLoading && user) {
+    } else if (hasCheckedAuth && user) {
       if (user.role === 'TUTOR') {
         router.push('/tutor');
       } else {
         router.push('/student');
       }
     }
-  }, [user, isLoading, router]);
+  }, [user, hasCheckedAuth, router]);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-emerald-50 via-white to-teal-50">
