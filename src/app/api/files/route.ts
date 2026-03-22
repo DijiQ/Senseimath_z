@@ -43,11 +43,6 @@ export async function GET(request: NextRequest) {
 
     const files = await db.lessonFile.findMany({
       where: { lessonId },
-      include: {
-        uploader: {
-          select: { id: true, name: true, username: true }
-        }
-      },
       orderBy: { createdAt: 'desc' }
     });
 
@@ -110,29 +105,46 @@ export async function POST(request: NextRequest) {
     const buffer = Buffer.from(bytes);
     await writeFile(filePath, buffer);
 
-    // Save to database
-    const lessonFile = await db.lessonFile.create({
-      data: {
-        lessonId,
-        uploaderId: user.id,
-        filename,
-        originalName: file.name,
-        mimeType: file.type,
-        size: file.size,
-        path: filePath
-      }
-    });
+    // Save to database - try with uploaderId first, fallback without
+    let lessonFile;
+    try {
+      lessonFile = await db.lessonFile.create({
+        data: {
+          lessonId,
+          uploaderId: user.id,
+          filename,
+          originalName: file.name,
+          mimeType: file.type,
+          size: file.size,
+          path: filePath
+        }
+      });
+    } catch {
+      // Fallback without uploaderId if schema doesn't have it
+      lessonFile = await db.lessonFile.create({
+        data: {
+          lessonId,
+          filename,
+          originalName: file.name,
+          mimeType: file.type,
+          size: file.size,
+          path: filePath
+        }
+      });
+    }
 
     // Notify students
-    await db.notification.createMany({
-      data: lesson.students.map(s => ({
-        userId: s.studentId,
-        type: 'NEW_FILE',
-        title: 'Новый файл',
-        message: `Загружен файл "${file.name}" к уроку "${lesson.title}"`,
-        data: JSON.stringify({ lessonId, fileId: lessonFile.id })
-      }))
-    });
+    if (lesson.students.length > 0) {
+      await db.notification.createMany({
+        data: lesson.students.map(s => ({
+          userId: s.studentId,
+          type: 'NEW_FILE',
+          title: 'Новый файл',
+          message: `Загружен файл "${file.name}" к уроку "${lesson.title}"`,
+          data: JSON.stringify({ lessonId, fileId: lessonFile.id })
+        }))
+      });
+    }
 
     return NextResponse.json({ file: lessonFile });
   } catch (error) {

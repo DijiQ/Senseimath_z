@@ -18,6 +18,7 @@ model User {
   name          String?
   role          Role     @default(STUDENT)
   avatar        String?
+  isManual      Boolean  @default(false) // Создан вручную репетитором
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
   
@@ -28,6 +29,8 @@ model User {
   studentRequests    TutorRequest[]     @relation("StudentRequests")
   notifications      Notification[]
   uploadedFiles      LessonFile[]
+  notes              Note[]
+  tutorNotes         Note[]             @relation("TutorNotes") // Заметки, написанные репетитором
 }
 
 enum Role {
@@ -126,4 +129,17 @@ model WhiteboardState {
   updatedAt DateTime @updatedAt
   
   lesson    Lesson   @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+}
+
+model Note {
+  id          String   @id @default(cuid())
+  tutorId     String
+  studentId   String
+  title       String
+  content     String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  tutor       User     @relation("TutorNotes", fields: [tutorId], references: [id])
+  student     User     @relation(fields: [studentId], references: [id])
 }

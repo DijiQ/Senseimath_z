@@ -12,7 +12,7 @@ import { Separator } from '@/components/ui/separator';
 import { toast } from 'sonner';
 import {
   BookOpen, Users, Calendar, Clock, FileText, LogOut, Download,
-  Upload, Trash2, Home, Pencil, Eraser, RotateCcw, Save, Palette, Minus, Square, Circle
+  Upload, Trash2, Home, Pencil, Eraser, RotateCcw, Save, Minus, Square, Circle, Menu, X
 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { ru } from 'date-fns/locale';
@@ -60,11 +60,10 @@ interface Lesson {
 }
 
 type Tool = 'pencil' | 'eraser' | 'line' | 'rectangle' | 'circle';
-type Color = string;
 
 const COLORS = [
-  '#000000', '#FF0000', '#00FF00', '#0000FF', '#FFFF00',
-  '#FF00FF', '#00FFFF', '#FFA500', '#800080', '#FFFFFF'
+  '#000000', '#FF0000', '#00AA00', '#0066FF', '#FF9900',
+  '#9900FF', '#00AAAA', '#FF00FF', '#666666', '#FFFFFF'
 ];
 
 const BRUSH_SIZES = [2, 4, 8, 12, 20];
@@ -78,27 +77,21 @@ export default function LessonPage() {
   const [lesson, setLesson] = useState<Lesson | null>(null);
   const [files, setFiles] = useState<LessonFile[]>([]);
   const [activeTab, setActiveTab] = useState('whiteboard');
+  const [initialized, setInitialized] = useState(false);
 
   // Whiteboard state
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [tool, setTool] = useState<Tool>('pencil');
-  const [color, setColor] = useState<Color>('#000000');
+  const [color, setColor] = useState('#000000');
   const [brushSize, setBrushSize] = useState(4);
   const [lastPos, setLastPos] = useState<{ x: number; y: number } | null>(null);
   const [startPos, setStartPos] = useState<{ x: number; y: number } | null>(null);
-  const [shapes, setShapes] = useState<Array<{
-    type: string;
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-    color: string;
-    size: number;
-  }>>([]);
   const [drawingHistory, setDrawingHistory] = useState<ImageData[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [isSaving, setIsSaving] = useState(false);
+  const [canvasReady, setCanvasReady] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -126,50 +119,34 @@ export default function LessonPage() {
     }
   }, [lessonId, router]);
 
-  const fetchWhiteboard = useCallback(async () => {
-    if (!lessonId) return;
-
-    const res = await fetch(`/api/whiteboard/${lessonId}`);
-    if (res.ok) {
-      const data = await res.json();
-      if (data.whiteboard && canvasRef.current) {
-        const canvas = canvasRef.current;
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          const img = new Image();
-          img.onload = () => {
-            ctx.drawImage(img, 0, 0);
-          };
-          img.src = data.whiteboard.imageData || data.whiteboard;
-        }
-      }
-    }
-  }, [lessonId]);
-
   useEffect(() => {
     if (user && lessonId) {
       fetchLesson();
-      fetchWhiteboard();
+      setInitialized(true);
     }
-  }, [user, lessonId, fetchLesson, fetchWhiteboard]);
+  }, [user, lessonId, fetchLesson]);
 
   // Initialize canvas
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (activeTab !== 'whiteboard' || !canvasRef.current || !containerRef.current) return;
 
+    const canvas = canvasRef.current;
+    const container = containerRef.current;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Set canvas size
     const resizeCanvas = () => {
-      const container = canvas.parentElement;
-      if (container) {
-        canvas.width = container.clientWidth;
-        canvas.height = container.clientHeight - 60;
-        ctx.fillStyle = '#FFFFFF';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-      }
+      const rect = container.getBoundingClientRect();
+      canvas.width = rect.width;
+      canvas.height = rect.height - 60;
+      
+      // Restore white background
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      
+      // Load saved whiteboard
+      fetchWhiteboard();
+      setCanvasReady(true);
     };
 
     resizeCanvas();
@@ -178,7 +155,28 @@ export default function LessonPage() {
     return () => window.removeEventListener('resize', resizeCanvas);
   }, [activeTab]);
 
-  // Drawing functions
+  const fetchWhiteboard = async () => {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext('2d');
+    if (!canvas || !ctx) return;
+
+    try {
+      const res = await fetch(`/api/whiteboard/${lessonId}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.whiteboard) {
+          const img = new Image();
+          img.onload = () => {
+            ctx.drawImage(img, 0, 0);
+          };
+          img.src = data.whiteboard.data || data.whiteboard;
+        }
+      }
+    } catch (error) {
+      console.error('Load whiteboard error:', error);
+    }
+  };
+
   const getMousePos = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
@@ -189,32 +187,39 @@ export default function LessonPage() {
     };
   };
 
-  const startDrawing = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const pos = getMousePos(e);
+  const getTouchPos = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas || !e.touches[0]) return { x: 0, y: 0 };
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: e.touches[0].clientX - rect.left,
+      y: e.touches[0].clientY - rect.top
+    };
+  };
+
+  const startDrawing = (pos: { x: number; y: number }) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
     setIsDrawing(true);
     setLastPos(pos);
     setStartPos(pos);
 
-    // Save current state for undo
-    const canvas = canvasRef.current;
-    if (canvas) {
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        setDrawingHistory(prev => [...prev.slice(0, historyIndex + 1), imageData]);
-        setHistoryIndex(prev => prev + 1);
-      }
-    }
+    // Save state for undo
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    setDrawingHistory(prev => [...prev.slice(0, historyIndex + 1), imageData]);
+    setHistoryIndex(prev => prev + 1);
   };
 
-  const draw = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const draw = (pos: { x: number; y: number }) => {
     if (!isDrawing) return;
 
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext('2d');
     if (!canvas || !ctx || !lastPos) return;
-
-    const pos = getMousePos(e);
 
     if (tool === 'pencil' || tool === 'eraser') {
       ctx.beginPath();
@@ -230,7 +235,7 @@ export default function LessonPage() {
     setLastPos(pos);
   };
 
-  const stopDrawing = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const stopDrawing = (pos: { x: number; y: number }) => {
     if (!isDrawing || !startPos) {
       setIsDrawing(false);
       return;
@@ -243,9 +248,7 @@ export default function LessonPage() {
       return;
     }
 
-    const pos = getMousePos(e);
-
-    // Draw shape if using shape tool
+    // Draw shape
     if (tool === 'line') {
       ctx.beginPath();
       ctx.moveTo(startPos.x, startPos.y);
@@ -316,7 +319,7 @@ export default function LessonPage() {
       } else {
         toast.error('Ошибка сохранения');
       }
-    } catch (error) {
+    } catch {
       toast.error('Ошибка сохранения');
     } finally {
       setIsSaving(false);
@@ -360,11 +363,13 @@ export default function LessonPage() {
       a.click();
       window.URL.revokeObjectURL(url);
     } else {
-      toast.error('Ошибка скачивания файла');
+      toast.error('Ошибка скачивания');
     }
   };
 
   const handleDeleteFile = async (fileId: string) => {
+    if (!confirm('Удалить файл?')) return;
+    
     const res = await fetch(`/api/files/${fileId}`, {
       method: 'DELETE'
     });
@@ -412,7 +417,7 @@ export default function LessonPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-teal-50 flex flex-col">
       {/* Header */}
-      <header className="bg-white border-b border-emerald-100 px-4 py-3">
+      <header className="bg-white border-b border-emerald-100 px-4 py-3 shrink-0">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
             <Link href={user.role === 'TUTOR' ? '/tutor' : '/student'}>
@@ -421,13 +426,13 @@ export default function LessonPage() {
               </Button>
             </Link>
             <div>
-              <h1 className="text-xl font-bold">{lesson.title}</h1>
+              <h1 className="text-lg md:text-xl font-bold">{lesson.title}</h1>
               <div className="flex items-center gap-4 text-sm text-gray-500">
                 <span className="flex items-center gap-1">
                   <Calendar className="w-4 h-4" />
-                  {format(parseISO(lesson.date), 'd MMMM yyyy', { locale: ru })}
+                  {format(parseISO(lesson.date), 'd MMM yyyy', { locale: ru })}
                 </span>
-                <span className="flex items-center gap-1">
+                <span className="hidden sm:flex items-center gap-1">
                   <Clock className="w-4 h-4" />
                   {format(parseISO(lesson.date), 'HH:mm')} ({lesson.duration} мин)
                 </span>
@@ -436,7 +441,7 @@ export default function LessonPage() {
           </div>
 
           <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2">
+            <div className="hidden md:flex items-center gap-2">
               <Avatar className="w-8 h-8">
                 <AvatarImage src={lesson.tutor.avatar || undefined} />
                 <AvatarFallback className="bg-emerald-500 text-white text-sm">
@@ -445,7 +450,7 @@ export default function LessonPage() {
               </Avatar>
               <span className="text-sm font-medium">{lesson.tutor.name || lesson.tutor.username}</span>
             </div>
-            <Separator orientation="vertical" className="h-8" />
+            <Separator orientation="vertical" className="h-8 hidden md:block" />
             <div className="flex -space-x-2">
               {lesson.students.slice(0, 3).map((s, i) => (
                 <Avatar key={s.student.id} className="w-8 h-8 border-2 border-white">
@@ -469,9 +474,9 @@ export default function LessonPage() {
       </header>
 
       {/* Main Content */}
-      <main className="flex-1 overflow-hidden">
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col">
-          <div className="px-4 pt-4">
+      <main className="flex-1 overflow-hidden flex flex-col">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col">
+          <div className="px-4 pt-4 shrink-0">
             <TabsList>
               <TabsTrigger value="whiteboard">
                 <Pencil className="w-4 h-4 mr-2" />
@@ -488,16 +493,17 @@ export default function LessonPage() {
             </TabsList>
           </div>
 
-          <TabsContent value="whiteboard" className="flex-1 p-4 m-0">
-            <div className="h-full flex flex-col bg-white rounded-lg border border-gray-200 overflow-hidden">
+          <TabsContent value="whiteboard" className="flex-1 p-4 m-0 min-h-0">
+            <div ref={containerRef} className="h-full flex flex-col bg-white rounded-lg border border-gray-200 overflow-hidden">
               {/* Toolbar */}
-              <div className="flex items-center gap-2 p-2 border-b bg-gray-50">
+              <div className="flex flex-wrap items-center gap-2 p-2 border-b bg-gray-50 shrink-0">
                 <div className="flex items-center gap-1 border-r pr-2 mr-2">
                   <Button
                     variant={tool === 'pencil' ? 'default' : 'ghost'}
                     size="icon"
                     onClick={() => setTool('pencil')}
                     className={tool === 'pencil' ? 'bg-emerald-500 hover:bg-emerald-600' : ''}
+                    title="Карандаш"
                   >
                     <Pencil className="w-4 h-4" />
                   </Button>
@@ -506,6 +512,7 @@ export default function LessonPage() {
                     size="icon"
                     onClick={() => setTool('eraser')}
                     className={tool === 'eraser' ? 'bg-emerald-500 hover:bg-emerald-600' : ''}
+                    title="Ластик"
                   >
                     <Eraser className="w-4 h-4" />
                   </Button>
@@ -514,6 +521,7 @@ export default function LessonPage() {
                     size="icon"
                     onClick={() => setTool('line')}
                     className={tool === 'line' ? 'bg-emerald-500 hover:bg-emerald-600' : ''}
+                    title="Линия"
                   >
                     <Minus className="w-4 h-4" />
                   </Button>
@@ -522,6 +530,7 @@ export default function LessonPage() {
                     size="icon"
                     onClick={() => setTool('rectangle')}
                     className={tool === 'rectangle' ? 'bg-emerald-500 hover:bg-emerald-600' : ''}
+                    title="Прямоугольник"
                   >
                     <Square className="w-4 h-4" />
                   </Button>
@@ -530,6 +539,7 @@ export default function LessonPage() {
                     size="icon"
                     onClick={() => setTool('circle')}
                     className={tool === 'circle' ? 'bg-emerald-500 hover:bg-emerald-600' : ''}
+                    title="Круг"
                   >
                     <Circle className="w-4 h-4" />
                   </Button>
@@ -540,7 +550,7 @@ export default function LessonPage() {
                   {COLORS.slice(0, 6).map(c => (
                     <button
                       key={c}
-                      className={`w-6 h-6 rounded-full border-2 ${color === c ? 'border-emerald-500' : 'border-gray-300'}`}
+                      className={`w-6 h-6 rounded-full border-2 ${color === c ? 'border-emerald-500 scale-110' : 'border-gray-300'}`}
                       style={{ backgroundColor: c }}
                       onClick={() => setColor(c)}
                     />
@@ -565,17 +575,17 @@ export default function LessonPage() {
                     >
                       <div
                         className="rounded-full bg-current"
-                        style={{ width: size, height: size }}
+                        style={{ width: Math.min(size, 16), height: Math.min(size, 16) }}
                       />
                     </Button>
                   ))}
                 </div>
 
                 <div className="flex items-center gap-1">
-                  <Button variant="ghost" size="icon" onClick={handleUndo} disabled={historyIndex <= 0}>
+                  <Button variant="ghost" size="icon" onClick={handleUndo} disabled={historyIndex <= 0} title="Отменить">
                     <RotateCcw className="w-4 h-4" />
                   </Button>
-                  <Button variant="ghost" size="icon" onClick={handleClear}>
+                  <Button variant="ghost" size="icon" onClick={handleClear} title="Очистить">
                     <Trash2 className="w-4 h-4" />
                   </Button>
                   <Button
@@ -591,14 +601,17 @@ export default function LessonPage() {
               </div>
 
               {/* Canvas */}
-              <div className="flex-1 relative bg-white">
+              <div className="flex-1 relative bg-white min-h-0">
                 <canvas
                   ref={canvasRef}
-                  className="absolute inset-0 cursor-crosshair"
-                  onMouseDown={startDrawing}
-                  onMouseMove={draw}
-                  onMouseUp={stopDrawing}
-                  onMouseLeave={stopDrawing}
+                  className="absolute inset-0 cursor-crosshair touch-none"
+                  onMouseDown={e => startDrawing(getMousePos(e))}
+                  onMouseMove={e => draw(getMousePos(e))}
+                  onMouseUp={e => stopDrawing(getMousePos(e))}
+                  onMouseLeave={e => stopDrawing(getMousePos(e))}
+                  onTouchStart={e => { e.preventDefault(); startDrawing(getTouchPos(e)); }}
+                  onTouchMove={e => { e.preventDefault(); draw(getTouchPos(e)); }}
+                  onTouchEnd={e => stopDrawing(getTouchPos(e))}
                 />
               </div>
             </div>
@@ -622,7 +635,7 @@ export default function LessonPage() {
                     Загрузить файл
                   </Button>
                   <p className="text-sm text-gray-500 mt-2">
-                    Максимальный размер файла: 10 МБ
+                    Максимум 10 МБ
                   </p>
                 </div>
               )}
@@ -631,7 +644,7 @@ export default function LessonPage() {
                 <Card>
                   <CardContent className="p-8 text-center">
                     <FileText className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-                    <p className="text-gray-500">Файлы не загружены</p>
+                    <p className="text-gray-500">Нет файлов</p>
                   </CardContent>
                 </Card>
               ) : (
@@ -641,17 +654,17 @@ export default function LessonPage() {
                       <CardContent className="p-4">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 bg-emerald-100 rounded-lg flex items-center justify-center">
+                            <div className="w-10 h-10 bg-emerald-100 rounded-lg flex items-center justify-center shrink-0">
                               <FileText className="w-5 h-5 text-emerald-600" />
                             </div>
-                            <div>
-                              <p className="font-medium">{file.originalName}</p>
+                            <div className="min-w-0">
+                              <p className="font-medium truncate">{file.originalName}</p>
                               <p className="text-sm text-gray-500">
-                                {formatFileSize(file.size)} • Загружен {format(new Date(file.createdAt), 'dd.MM.yyyy HH:mm')}
+                                {formatFileSize(file.size)} • {format(new Date(file.createdAt), 'dd.MM.yyyy HH:mm')}
                               </p>
                             </div>
                           </div>
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 shrink-0">
                             <Button
                               variant="outline"
                               size="icon"
@@ -663,6 +676,7 @@ export default function LessonPage() {
                               <Button
                                 variant="outline"
                                 size="icon"
+                                className="text-red-500 hover:text-red-600"
                                 onClick={() => handleDeleteFile(file.id)}
                               >
                                 <Trash2 className="w-4 h-4" />
@@ -682,7 +696,7 @@ export default function LessonPage() {
             <div className="max-w-4xl mx-auto space-y-6">
               <Card>
                 <CardHeader>
-                  <CardTitle>Информация об уроке</CardTitle>
+                  <CardTitle>Об уроке</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div>

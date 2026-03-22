@@ -9,7 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -19,8 +19,8 @@ import { Calendar } from '@/components/ui/calendar';
 import { toast } from 'sonner';
 import {
   BookOpen, Users, Calendar as CalendarIcon, Bell, FileText, LogOut, Plus, Search,
-  ChevronLeft, ChevronRight, Clock, User, X, Check, AlertCircle, Upload, Download,
-  Trash2, Copy, MoreHorizontal, Settings, Menu
+  ChevronLeft, ChevronRight, Clock, User, X, Check, AlertCircle,
+  Trash2, Copy, Menu, StickyNote, Edit, ExternalLink, UserPlus
 } from 'lucide-react';
 import { format, startOfWeek, addDays, isSameDay, addWeeks, subWeeks, parseISO, setHours, setMinutes } from 'date-fns';
 import { ru } from 'date-fns/locale';
@@ -32,6 +32,7 @@ interface Student {
   email: string;
   username: string;
   avatar: string | null;
+  isManual?: boolean;
 }
 
 interface Lesson {
@@ -54,6 +55,19 @@ interface Notification {
   data: string | null;
 }
 
+interface Note {
+  id: string;
+  title: string;
+  content: string;
+  createdAt: string;
+  updatedAt: string;
+  student: {
+    id: string;
+    name: string | null;
+    username: string;
+  };
+}
+
 export default function TutorPage() {
   const { user, isLoading, initialized, fetchUser, logout } = useAuth();
   const router = useRouter();
@@ -64,6 +78,7 @@ export default function TutorPage() {
   const [students, setStudents] = useState<Student[]>([]);
   const [pendingRequests, setPendingRequests] = useState<{ id: string; student: Student }[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [notes, setNotes] = useState<Note[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [showNotifications, setShowNotifications] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -71,17 +86,25 @@ export default function TutorPage() {
   
   // Form states
   const [showNewLesson, setShowNewLesson] = useState(false);
-  const [showFindStudent, setShowFindStudent] = useState(false);
+  const [showAddStudent, setShowAddStudent] = useState(false);
+  const [showNewNote, setShowNewNote] = useState(false);
   const [searchEmail, setSearchEmail] = useState('');
   const [searchResult, setSearchResult] = useState<Student | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [manualName, setManualName] = useState('');
   const [lessonTitle, setLessonTitle] = useState('');
   const [lessonDescription, setLessonDescription] = useState('');
   const [lessonDate, setLessonDate] = useState<Date>();
   const [lessonTime, setLessonTime] = useState('10:00');
   const [lessonDuration, setLessonDuration] = useState(60);
   const [selectedStudents, setSelectedStudents] = useState<string[]>([]);
+  
+  // Note form
+  const [noteTitle, setNoteTitle] = useState('');
+  const [noteContent, setNoteContent] = useState('');
+  const [noteStudentId, setNoteStudentId] = useState('');
+  const [editingNote, setEditingNote] = useState<Note | null>(null);
 
-  // Проверка авторизации только один раз
   useEffect(() => {
     if (!initialized && !authChecked) {
       setAuthChecked(true);
@@ -89,7 +112,6 @@ export default function TutorPage() {
     }
   }, [initialized, authChecked, fetchUser]);
 
-  // Редирект если не авторизован или не репетитор
   useEffect(() => {
     if (initialized && !user) {
       router.push('/auth/login');
@@ -104,32 +126,42 @@ export default function TutorPage() {
     const weekStartStr = format(currentWeekStart, 'yyyy-MM-dd');
     const weekEndStr = format(addDays(currentWeekStart, 6), 'yyyy-MM-dd');
     
-    const [lessonsRes, studentsRes, requestsRes, notifRes] = await Promise.all([
-      fetch(`/api/lessons?weekStart=${weekStartStr}&weekEnd=${weekEndStr}`),
-      fetch('/api/students'),
-      fetch('/api/invitations'),
-      fetch('/api/notifications')
-    ]);
-    
-    if (lessonsRes.ok) {
-      const data = await lessonsRes.json();
-      setLessons(data.lessons);
-    }
-    
-    if (studentsRes.ok) {
-      const data = await studentsRes.json();
-      setStudents(data.students || []);
-    }
-    
-    if (requestsRes.ok) {
-      const data = await requestsRes.json();
-      setPendingRequests(data.requests || []);
-    }
-    
-    if (notifRes.ok) {
-      const data = await notifRes.json();
-      setNotifications(data.notifications || []);
-      setUnreadCount(data.unreadCount || 0);
+    try {
+      const [lessonsRes, studentsRes, requestsRes, notifRes, notesRes] = await Promise.all([
+        fetch(`/api/lessons?weekStart=${weekStartStr}&weekEnd=${weekEndStr}`),
+        fetch('/api/students'),
+        fetch('/api/invitations'),
+        fetch('/api/notifications'),
+        fetch('/api/notes')
+      ]);
+      
+      if (lessonsRes.ok) {
+        const data = await lessonsRes.json();
+        setLessons(data.lessons);
+      }
+      
+      if (studentsRes.ok) {
+        const data = await studentsRes.json();
+        setStudents(data.students || []);
+      }
+      
+      if (requestsRes.ok) {
+        const data = await requestsRes.json();
+        setPendingRequests(data.requests || []);
+      }
+      
+      if (notifRes.ok) {
+        const data = await notifRes.json();
+        setNotifications(data.notifications || []);
+        setUnreadCount(data.unreadCount || 0);
+      }
+      
+      if (notesRes.ok) {
+        const data = await notesRes.json();
+        setNotes(data.notes || []);
+      }
+    } catch (error) {
+      console.error('Fetch data error:', error);
     }
   }, [user, currentWeekStart]);
 
@@ -137,8 +169,7 @@ export default function TutorPage() {
     if (user) {
       fetchData();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user]);
+  }, [user, fetchData]);
 
   const handleLogout = async () => {
     await logout();
@@ -150,33 +181,98 @@ export default function TutorPage() {
   const handleToday = () => setCurrentWeekStart(startOfWeek(new Date(), { weekStartsOn: 1 }));
 
   const handleSearchStudent = async () => {
-    if (!searchEmail) return;
+    if (!searchEmail.trim()) return;
     
-    const res = await fetch(`/api/students?email=${encodeURIComponent(searchEmail)}`);
-    if (res.ok) {
-      const data = await res.json();
-      setSearchResult(data.student);
-    } else {
+    setSearching(true);
+    try {
+      const res = await fetch(`/api/students?email=${encodeURIComponent(searchEmail.trim())}`);
+      if (res.ok) {
+        const data = await res.json();
+        setSearchResult(data.student);
+      } else {
+        setSearchResult(null);
+      }
+    } catch (error) {
       setSearchResult(null);
-      toast.error('Ученик не найден');
+    } finally {
+      setSearching(false);
     }
   };
 
   const handleInviteStudent = async (studentId: string) => {
-    const res = await fetch('/api/invitations', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ studentId })
-    });
-    
-    if (res.ok) {
-      toast.success('Приглашение отправлено');
-      setSearchResult(null);
-      setSearchEmail('');
-      setShowFindStudent(false);
-    } else {
+    try {
+      const res = await fetch('/api/students', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ studentId })
+      });
+      
       const data = await res.json();
-      toast.error(data.error || 'Ошибка отправки');
+      
+      if (res.ok) {
+        toast.success(data.created ? 'Ученик создан и добавлен' : 'Приглашение отправлено');
+        setSearchResult(null);
+        setSearchEmail('');
+        setManualName('');
+        setShowAddStudent(false);
+        fetchData();
+      } else {
+        toast.error(data.error || 'Ошибка');
+      }
+    } catch (error) {
+      toast.error('Ошибка соединения');
+    }
+  };
+
+  const handleCreateManualStudent = async () => {
+    if (!manualName.trim()) {
+      toast.error('Введите имя ученика');
+      return;
+    }
+    
+    try {
+      const res = await fetch('/api/students', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          name: manualName.trim(),
+          createManual: true 
+        })
+      });
+      
+      const data = await res.json();
+      
+      if (res.ok) {
+        toast.success('Ученик создан');
+        setManualName('');
+        setSearchEmail('');
+        setSearchResult(null);
+        setShowAddStudent(false);
+        fetchData();
+      } else {
+        toast.error(data.error || 'Ошибка создания');
+      }
+    } catch (error) {
+      toast.error('Ошибка соединения');
+    }
+  };
+
+  const handleRemoveStudent = async (studentId: string) => {
+    if (!confirm('Удалить ученика из списка?')) return;
+    
+    try {
+      const res = await fetch(`/api/students?studentId=${studentId}`, {
+        method: 'DELETE'
+      });
+      
+      if (res.ok) {
+        toast.success('Ученик удалён');
+        fetchData();
+      } else {
+        toast.error('Ошибка удаления');
+      }
+    } catch (error) {
+      toast.error('Ошибка соединения');
     }
   };
 
@@ -189,45 +285,55 @@ export default function TutorPage() {
     const [hours, minutes] = lessonTime.split(':').map(Number);
     const lessonDateTime = setMinutes(setHours(lessonDate, hours), minutes);
     
-    const res = await fetch('/api/lessons', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        title: lessonTitle,
-        description: lessonDescription,
-        date: lessonDateTime.toISOString(),
-        duration: lessonDuration,
-        studentIds: selectedStudents
-      })
-    });
-    
-    if (res.ok) {
-      toast.success('Урок создан');
-      setShowNewLesson(false);
-      setLessonTitle('');
-      setLessonDescription('');
-      setSelectedStudents([]);
-      fetchData();
-    } else {
-      const data = await res.json();
-      toast.error(data.error || 'Ошибка создания');
+    try {
+      const res = await fetch('/api/lessons', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: lessonTitle,
+          description: lessonDescription,
+          date: lessonDateTime.toISOString(),
+          duration: lessonDuration,
+          studentIds: selectedStudents
+        })
+      });
+      
+      if (res.ok) {
+        toast.success('Урок создан');
+        setShowNewLesson(false);
+        setLessonTitle('');
+        setLessonDescription('');
+        setSelectedStudents([]);
+        fetchData();
+      } else {
+        const data = await res.json();
+        toast.error(data.error || 'Ошибка создания');
+      }
+    } catch (error) {
+      toast.error('Ошибка соединения');
     }
   };
 
   const handleDuplicateWeek = async () => {
-    const res = await fetch('/api/lessons/duplicate-week', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        weekStart: format(currentWeekStart, 'yyyy-MM-dd')
-      })
-    });
+    if (!confirm('Дублировать расписание на следующую неделю?')) return;
     
-    if (res.ok) {
-      toast.success('Расписание продублировано на следующую неделю');
-      fetchData();
-    } else {
-      toast.error('Ошибка дублирования');
+    try {
+      const res = await fetch('/api/lessons/duplicate-week', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          weekStart: format(currentWeekStart, 'yyyy-MM-dd')
+        })
+      });
+      
+      if (res.ok) {
+        toast.success('Расписание продублировано');
+        fetchData();
+      } else {
+        toast.error('Ошибка дублирования');
+      }
+    } catch (error) {
+      toast.error('Ошибка соединения');
     }
   };
 
@@ -273,6 +379,93 @@ export default function TutorPage() {
       toast.success('Заявка отклонена');
       fetchData();
     }
+  };
+
+  const handleCreateNote = async () => {
+    if (!noteTitle.trim() || !noteContent.trim() || !noteStudentId) {
+      toast.error('Заполните все поля');
+      return;
+    }
+    
+    try {
+      const res = await fetch('/api/notes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          studentId: noteStudentId,
+          title: noteTitle,
+          content: noteContent
+        })
+      });
+      
+      if (res.ok) {
+        toast.success('Заметка создана');
+        setShowNewNote(false);
+        setNoteTitle('');
+        setNoteContent('');
+        setNoteStudentId('');
+        fetchData();
+      } else {
+        toast.error('Ошибка создания');
+      }
+    } catch (error) {
+      toast.error('Ошибка соединения');
+    }
+  };
+
+  const handleUpdateNote = async () => {
+    if (!editingNote || !noteTitle.trim() || !noteContent.trim()) {
+      toast.error('Заполните все поля');
+      return;
+    }
+    
+    try {
+      const res = await fetch('/api/notes', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          noteId: editingNote.id,
+          title: noteTitle,
+          content: noteContent
+        })
+      });
+      
+      if (res.ok) {
+        toast.success('Заметка обновлена');
+        setEditingNote(null);
+        setNoteTitle('');
+        setNoteContent('');
+        fetchData();
+      } else {
+        toast.error('Ошибка обновления');
+      }
+    } catch (error) {
+      toast.error('Ошибка соединения');
+    }
+  };
+
+  const handleDeleteNote = async (noteId: string) => {
+    if (!confirm('Удалить заметку?')) return;
+    
+    try {
+      const res = await fetch(`/api/notes?noteId=${noteId}`, {
+        method: 'DELETE'
+      });
+      
+      if (res.ok) {
+        toast.success('Заметка удалена');
+        fetchData();
+      }
+    } catch (error) {
+      toast.error('Ошибка удаления');
+    }
+  };
+
+  const openEditNote = (note: Note) => {
+    setEditingNote(note);
+    setNoteTitle(note.title);
+    setNoteContent(note.content);
+    setNoteStudentId(note.student.id);
   };
 
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(currentWeekStart, i));
@@ -343,6 +536,18 @@ export default function TutorPage() {
           >
             <BookOpen className="w-5 h-5 mr-3" />
             {sidebarOpen && 'Уроки'}
+          </Button>
+
+          <Button
+            variant={activeTab === 'notes' ? 'default' : 'ghost'}
+            className={`w-full justify-start ${activeTab === 'notes' ? 'bg-emerald-500 hover:bg-emerald-600' : ''}`}
+            onClick={() => setActiveTab('notes')}
+          >
+            <StickyNote className="w-5 h-5 mr-3" />
+            {sidebarOpen && 'Заметки'}
+            {notes.length > 0 && sidebarOpen && (
+              <Badge className="ml-auto bg-emerald-600">{notes.length}</Badge>
+            )}
           </Button>
         </nav>
         
@@ -421,7 +626,7 @@ export default function TutorPage() {
         {/* Schedule Tab */}
         {activeTab === 'schedule' && (
           <div className="h-full flex flex-col p-6">
-            <div className="flex justify-between items-center mb-6">
+            <div className="flex flex-wrap justify-between items-center mb-6 gap-4">
               <div className="flex items-center gap-4">
                 <h1 className="text-2xl font-bold">Расписание</h1>
                 <div className="flex items-center gap-2">
@@ -433,14 +638,15 @@ export default function TutorPage() {
                     <ChevronRight className="w-5 h-5" />
                   </Button>
                 </div>
-                <span className="text-lg text-gray-600">
+                <span className="text-lg text-gray-600 hidden sm:inline">
                   {format(currentWeekStart, 'd MMMM', { locale: ru })} - {format(addDays(currentWeekStart, 6), 'd MMMM yyyy', { locale: ru })}
                 </span>
               </div>
               <div className="flex gap-2">
                 <Button variant="outline" onClick={handleDuplicateWeek}>
                   <Copy className="w-4 h-4 mr-2" />
-                  Дублировать на следующую неделю
+                  <span className="hidden sm:inline">Дублировать неделю</span>
+                  <Copy className="w-4 h-4 sm:hidden" />
                 </Button>
                 <Dialog open={showNewLesson} onOpenChange={setShowNewLesson}>
                   <DialogTrigger asChild>
@@ -480,7 +686,7 @@ export default function TutorPage() {
                             <PopoverTrigger asChild>
                               <Button variant="outline" className="w-full justify-start">
                                 <CalendarIcon className="w-4 h-4 mr-2" />
-                                {lessonDate ? format(lessonDate, 'dd.MM.yyyy') : 'Выберите дату'}
+                                {lessonDate ? format(lessonDate, 'dd.MM.yyyy') : 'Выберите'}
                               </Button>
                             </PopoverTrigger>
                             <PopoverContent>
@@ -488,7 +694,6 @@ export default function TutorPage() {
                                 mode="single"
                                 selected={lessonDate}
                                 onSelect={setLessonDate}
-                                disabled={date => date < new Date()}
                               />
                             </PopoverContent>
                           </Popover>
@@ -503,7 +708,7 @@ export default function TutorPage() {
                         </div>
                       </div>
                       <div>
-                        <Label>Длительность (мин)</Label>
+                        <Label>Длительность</Label>
                         <Select value={lessonDuration.toString()} onValueChange={v => setLessonDuration(Number(v))}>
                           <SelectTrigger>
                             <SelectValue />
@@ -518,11 +723,11 @@ export default function TutorPage() {
                         </Select>
                       </div>
                       <div>
-                        <Label>Ученики *</Label>
+                        <Label>Ученики * ({students.length})</Label>
                         <ScrollArea className="h-32 border rounded-md p-2">
                           {students.length === 0 ? (
                             <p className="text-sm text-gray-500 text-center py-4">
-                              Нет учеников. Добавьте учеников во вкладке "Ученики"
+                              Нет учеников. Добавьте во вкладке "Ученики"
                             </p>
                           ) : (
                             <div className="space-y-2">
@@ -544,6 +749,7 @@ export default function TutorPage() {
                                     className="rounded border-gray-300 text-emerald-500 focus:ring-emerald-500"
                                   />
                                   <span>{student.name || student.username}</span>
+                                  {student.isManual && <Badge variant="outline" className="text-xs">ручной</Badge>}
                                 </label>
                               ))}
                             </div>
@@ -561,85 +767,105 @@ export default function TutorPage() {
 
             {/* Week Grid */}
             <div className="flex-1 overflow-auto">
-              <div className="grid grid-cols-7 gap-2 min-h-full">
-                {weekDays.map(day => {
-                  const dayLessons = getLessonsForDay(day);
-                  const isToday = isSameDay(day, new Date());
-                  
-                  return (
-                    <div
-                      key={day.toISOString()}
-                      className={`rounded-lg border ${isToday ? 'border-emerald-500 bg-emerald-50/50' : 'border-gray-200 bg-white'}`}
-                    >
-                      <div className={`p-3 border-b ${isToday ? 'bg-emerald-500 text-white' : 'bg-gray-50'}`}>
-                        <p className="font-medium">{format(day, 'EEEE', { locale: ru })}</p>
-                        <p className="text-sm opacity-80">{format(day, 'd MMMM', { locale: ru })}</p>
-                      </div>
-                      <ScrollArea className="h-[calc(100vh-280px)]">
-                        <div className="p-2 space-y-2">
-                          {dayLessons.map(lesson => (
-                            <Link
-                              key={lesson.id}
-                              href={`/lesson/${lesson.id}`}
-                              className="block p-3 bg-gradient-to-r from-emerald-500 to-teal-500 text-white rounded-lg hover:shadow-md transition-shadow"
-                            >
-                              <p className="font-medium truncate">{lesson.title}</p>
-                              <div className="flex items-center gap-1 text-sm opacity-90 mt-1">
-                                <Clock className="w-3 h-3" />
-                                {format(parseISO(lesson.date), 'HH:mm')} ({lesson.duration} мин)
-                              </div>
-                              <div className="flex items-center gap-1 text-sm opacity-90">
-                                <Users className="w-3 h-3" />
-                                {lesson.students.length} ученик(ов)
-                              </div>
-                            </Link>
-                          ))}
+              {students.length === 0 ? (
+                <Card className="h-full flex items-center justify-center">
+                  <CardContent className="text-center p-8">
+                    <Users className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                    <p className="text-xl text-gray-500 mb-2">Добавьте учеников</p>
+                    <p className="text-sm text-gray-400 mb-4">Чтобы создавать уроки, нужны ученики</p>
+                    <Button onClick={() => setActiveTab('students')} className="bg-emerald-500 hover:bg-emerald-600">
+                      <UserPlus className="w-4 h-4 mr-2" />
+                      Добавить ученика
+                    </Button>
+                  </CardContent>
+                </Card>
+              ) : (
+                <div className="grid grid-cols-7 gap-2 min-h-full">
+                  {weekDays.map(day => {
+                    const dayLessons = getLessonsForDay(day);
+                    const isToday = isSameDay(day, new Date());
+                    
+                    return (
+                      <div
+                        key={day.toISOString()}
+                        className={`rounded-lg border ${isToday ? 'border-emerald-500 bg-emerald-50/50' : 'border-gray-200 bg-white'}`}
+                      >
+                        <div className={`p-3 border-b ${isToday ? 'bg-emerald-500 text-white' : 'bg-gray-50'}`}>
+                          <p className="font-medium text-sm">{format(day, 'EEEE', { locale: ru })}</p>
+                          <p className="text-xs opacity-80">{format(day, 'd MMM', { locale: ru })}</p>
                         </div>
-                      </ScrollArea>
-                    </div>
-                  );
-                })}
-              </div>
+                        <ScrollArea className="h-[calc(100vh-300px)]">
+                          <div className="p-1 space-y-1">
+                            {dayLessons.map(lesson => (
+                              <Link
+                                key={lesson.id}
+                                href={`/lesson/${lesson.id}`}
+                                className="block p-2 bg-gradient-to-r from-emerald-500 to-teal-500 text-white rounded-lg hover:shadow-md transition-shadow"
+                              >
+                                <p className="font-medium text-sm truncate">{lesson.title}</p>
+                                <div className="flex items-center gap-1 text-xs opacity-90">
+                                  <Clock className="w-3 h-3" />
+                                  {format(parseISO(lesson.date), 'HH:mm')}
+                                </div>
+                                <div className="flex items-center gap-1 text-xs opacity-90">
+                                  <Users className="w-3 h-3" />
+                                  {lesson.students.length}
+                                </div>
+                              </Link>
+                            ))}
+                          </div>
+                        </ScrollArea>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
         )}
 
         {/* Students Tab */}
         {activeTab === 'students' && (
-          <div className="h-full p-6">
+          <div className="h-full p-6 overflow-auto">
             <div className="flex justify-between items-center mb-6">
-              <h1 className="text-2xl font-bold">Мои ученики</h1>
-              <Dialog open={showFindStudent} onOpenChange={setShowFindStudent}>
+              <h1 className="text-2xl font-bold">Ученики</h1>
+              <Dialog open={showAddStudent} onOpenChange={setShowAddStudent}>
                 <DialogTrigger asChild>
                   <Button className="bg-emerald-500 hover:bg-emerald-600">
-                    <Plus className="w-4 h-4 mr-2" />
+                    <UserPlus className="w-4 h-4 mr-2" />
                     Добавить ученика
                   </Button>
                 </DialogTrigger>
-                <DialogContent>
+                <DialogContent className="max-w-md">
                   <DialogHeader>
-                    <DialogTitle>Найти ученика</DialogTitle>
+                    <DialogTitle>Добавить ученика</DialogTitle>
                     <DialogDescription>
-                      Введите email ученика, чтобы отправить ему приглашение
+                      Найдите ученика по email или создайте новую карточку
                     </DialogDescription>
                   </DialogHeader>
                   <div className="space-y-4">
-                    <div className="flex gap-2">
-                      <Input
-                        type="email"
-                        placeholder="email@example.com"
-                        value={searchEmail}
-                        onChange={e => setSearchEmail(e.target.value)}
-                      />
-                      <Button onClick={handleSearchStudent}>Найти</Button>
+                    <div>
+                      <Label>Поиск по email</Label>
+                      <div className="flex gap-2">
+                        <Input
+                          type="email"
+                          placeholder="email@example.com"
+                          value={searchEmail}
+                          onChange={e => setSearchEmail(e.target.value)}
+                          onKeyDown={e => e.key === 'Enter' && handleSearchStudent()}
+                        />
+                        <Button onClick={handleSearchStudent} disabled={searching}>
+                          {searching ? '...' : 'Найти'}
+                        </Button>
+                      </div>
                     </div>
+                    
                     {searchResult && (
-                      <Card>
+                      <Card className="border-emerald-200 bg-emerald-50">
                         <CardContent className="p-4">
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-3">
                               <Avatar>
-                                <AvatarImage src={searchResult.avatar || undefined} />
                                 <AvatarFallback>
                                   {searchResult.name?.[0] || searchResult.username[0].toUpperCase()}
                                 </AvatarFallback>
@@ -654,12 +880,41 @@ export default function TutorPage() {
                               className="bg-emerald-500 hover:bg-emerald-600"
                               onClick={() => handleInviteStudent(searchResult.id)}
                             >
-                              Пригласить
+                              Добавить
                             </Button>
                           </div>
                         </CardContent>
                       </Card>
                     )}
+                    
+                    <div className="relative">
+                      <div className="absolute inset-0 flex items-center">
+                        <span className="w-full border-t" />
+                      </div>
+                      <div className="relative flex justify-center text-xs uppercase">
+                        <span className="bg-white px-2 text-gray-500">или</span>
+                      </div>
+                    </div>
+                    
+                    <div>
+                      <Label>Создать карточку ученика</Label>
+                      <p className="text-xs text-gray-500 mb-2">
+                        Для учеников без аккаунта в системе
+                      </p>
+                      <div className="flex gap-2">
+                        <Input
+                          placeholder="Имя ученика"
+                          value={manualName}
+                          onChange={e => setManualName(e.target.value)}
+                        />
+                        <Button 
+                          onClick={handleCreateManualStudent}
+                          disabled={!manualName.trim()}
+                        >
+                          Создать
+                        </Button>
+                      </div>
+                    </div>
                   </div>
                 </DialogContent>
               </Dialog>
@@ -668,7 +923,7 @@ export default function TutorPage() {
             <Tabs defaultValue="students">
               <TabsList>
                 <TabsTrigger value="students">
-                  Ученики ({students.length})
+                  Мои ученики ({students.length})
                 </TabsTrigger>
                 <TabsTrigger value="requests">
                   Заявки ({pendingRequests.length})
@@ -681,25 +936,36 @@ export default function TutorPage() {
                     <CardContent className="p-8 text-center">
                       <Users className="w-12 h-12 text-gray-300 mx-auto mb-4" />
                       <p className="text-gray-500">У вас пока нет учеников</p>
-                      <p className="text-sm text-gray-400 mt-2">Добавьте учеников, чтобы начать работу</p>
                     </CardContent>
                   </Card>
                 ) : (
                   <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {students.map(student => (
-                      <Card key={student.id}>
+                      <Card key={student.id} className="group">
                         <CardContent className="p-4">
                           <div className="flex items-center gap-3">
                             <Avatar className="w-12 h-12">
-                              <AvatarImage src={student.avatar || undefined} />
                               <AvatarFallback className="bg-emerald-500 text-white text-lg">
                                 {student.name?.[0] || student.username[0].toUpperCase()}
                               </AvatarFallback>
                             </Avatar>
                             <div className="flex-1 min-w-0">
-                              <p className="font-medium truncate">{student.name || student.username}</p>
+                              <div className="flex items-center gap-2">
+                                <p className="font-medium truncate">{student.name || student.username}</p>
+                                {student.isManual && (
+                                  <Badge variant="outline" className="text-xs">ручной</Badge>
+                                )}
+                              </div>
                               <p className="text-sm text-gray-500 truncate">{student.email}</p>
                             </div>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="opacity-0 group-hover:opacity-100 text-red-500 hover:text-red-600 hover:bg-red-50"
+                              onClick={() => handleRemoveStudent(student.id)}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
                           </div>
                         </CardContent>
                       </Card>
@@ -724,7 +990,6 @@ export default function TutorPage() {
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-3">
                               <Avatar>
-                                <AvatarImage src={request.student.avatar || undefined} />
                                 <AvatarFallback>
                                   {request.student.name?.[0] || request.student.username[0].toUpperCase()}
                                 </AvatarFallback>
@@ -763,30 +1028,30 @@ export default function TutorPage() {
 
         {/* Lessons Tab */}
         {activeTab === 'lessons' && (
-          <div className="h-full p-6">
-            <h1 className="text-2xl font-bold mb-6">Все уроки</h1>
+          <div className="h-full p-6 overflow-auto">
+            <h1 className="text-2xl font-bold mb-6">Уроки</h1>
             {lessons.length === 0 ? (
               <Card>
                 <CardContent className="p-8 text-center">
                   <BookOpen className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-                  <p className="text-gray-500">У вас пока нет запланированных уроков</p>
+                  <p className="text-gray-500">Нет запланированных уроков</p>
                 </CardContent>
               </Card>
             ) : (
               <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {lessons.map(lesson => (
                   <Link key={lesson.id} href={`/lesson/${lesson.id}`}>
-                    <Card className="hover:shadow-md transition-shadow cursor-pointer">
+                    <Card className="hover:shadow-md transition-shadow cursor-pointer h-full">
                       <CardHeader>
                         <CardTitle className="text-lg">{lesson.title}</CardTitle>
                         <CardDescription>
-                          {format(parseISO(lesson.date), 'd MMMM yyyy, HH:mm', { locale: ru })}
+                          {format(parseISO(lesson.date), 'd MMMM, HH:mm', { locale: ru })}
                         </CardDescription>
                       </CardHeader>
                       <CardContent>
                         <div className="flex items-center gap-2 text-sm text-gray-500 mb-2">
                           <Clock className="w-4 h-4" />
-                          {lesson.duration} минут
+                          {lesson.duration} мин
                         </div>
                         <div className="flex items-center gap-2 text-sm text-gray-500 mb-2">
                           <Users className="w-4 h-4" />
@@ -801,6 +1066,141 @@ export default function TutorPage() {
                       </CardContent>
                     </Card>
                   </Link>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Notes Tab */}
+        {activeTab === 'notes' && (
+          <div className="h-full p-6 overflow-auto">
+            <div className="flex justify-between items-center mb-6">
+              <h1 className="text-2xl font-bold">Заметки</h1>
+              <Dialog open={showNewNote} onOpenChange={setShowNewNote}>
+                <DialogTrigger asChild>
+                  <Button className="bg-emerald-500 hover:bg-emerald-600" disabled={students.length === 0}>
+                    <Plus className="w-4 h-4 mr-2" />
+                    Новая заметка
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Новая заметка</DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-4">
+                    <div>
+                      <Label>Ученик</Label>
+                      <Select value={noteStudentId} onValueChange={setNoteStudentId}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Выберите ученика" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {students.map(s => (
+                            <SelectItem key={s.id} value={s.id}>
+                              {s.name || s.username}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label>Заголовок</Label>
+                      <Input
+                        value={noteTitle}
+                        onChange={e => setNoteTitle(e.target.value)}
+                        placeholder="Тема заметки"
+                      />
+                    </div>
+                    <div>
+                      <Label>Содержание</Label>
+                      <Textarea
+                        value={noteContent}
+                        onChange={e => setNoteContent(e.target.value)}
+                        placeholder="Текст заметки..."
+                        rows={6}
+                      />
+                    </div>
+                    <Button className="w-full bg-emerald-500 hover:bg-emerald-600" onClick={handleCreateNote}>
+                      Создать
+                    </Button>
+                  </div>
+                </DialogContent>
+              </Dialog>
+            </div>
+
+            {/* Edit Note Dialog */}
+            <Dialog open={!!editingNote} onOpenChange={() => setEditingNote(null)}>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Редактировать заметку</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-4">
+                  <div>
+                    <Label>Заголовок</Label>
+                    <Input
+                      value={noteTitle}
+                      onChange={e => setNoteTitle(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <Label>Содержание</Label>
+                    <Textarea
+                      value={noteContent}
+                      onChange={e => setNoteContent(e.target.value)}
+                      rows={6}
+                    />
+                  </div>
+                  <Button className="w-full bg-emerald-500 hover:bg-emerald-600" onClick={handleUpdateNote}>
+                    Сохранить
+                  </Button>
+                </div>
+              </DialogContent>
+            </Dialog>
+
+            {students.length === 0 ? (
+              <Card>
+                <CardContent className="p-8 text-center">
+                  <StickyNote className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+                  <p className="text-gray-500">Добавьте учеников для создания заметок</p>
+                </CardContent>
+              </Card>
+            ) : notes.length === 0 ? (
+              <Card>
+                <CardContent className="p-8 text-center">
+                  <StickyNote className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+                  <p className="text-gray-500">Нет заметок</p>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="grid md:grid-cols-2 gap-4">
+                {notes.map(note => (
+                  <Card key={note.id}>
+                    <CardHeader className="pb-2">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <CardTitle className="text-lg">{note.title}</CardTitle>
+                          <CardDescription>
+                            {note.student.name || note.student.username}
+                          </CardDescription>
+                        </div>
+                        <div className="flex gap-1">
+                          <Button variant="ghost" size="icon" onClick={() => openEditNote(note)}>
+                            <Edit className="w-4 h-4" />
+                          </Button>
+                          <Button variant="ghost" size="icon" className="text-red-500" onClick={() => handleDeleteNote(note.id)}>
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-sm text-gray-600 whitespace-pre-wrap line-clamp-4">{note.content}</p>
+                      <p className="text-xs text-gray-400 mt-2">
+                        {format(new Date(note.updatedAt), 'dd.MM.yyyy HH:mm')}
+                      </p>
+                    </CardContent>
+                  </Card>
                 ))}
               </div>
             )}

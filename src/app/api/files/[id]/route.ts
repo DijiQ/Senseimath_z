@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getCurrentUser } from '@/lib/auth';
-import { readFile } from 'fs/promises';
+import { readFile, unlink } from 'fs/promises';
 
 // GET - Download file
 export async function GET(
@@ -82,7 +82,6 @@ export async function DELETE(
     }
 
     // Delete file from filesystem
-    const { unlink } = await import('fs/promises');
     try {
       await unlink(file.path);
     } catch {
