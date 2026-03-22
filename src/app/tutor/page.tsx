@@ -91,7 +91,9 @@ export default function TutorPage() {
   const [searchEmail, setSearchEmail] = useState('');
   const [searchResult, setSearchResult] = useState<Student | null>(null);
   const [searching, setSearching] = useState(false);
+  const [searchNotFound, setSearchNotFound] = useState(false);
   const [manualName, setManualName] = useState('');
+  const [addMode, setAddMode] = useState<'search' | 'manual'>('manual');
   const [lessonTitle, setLessonTitle] = useState('');
   const [lessonDescription, setLessonDescription] = useState('');
   const [lessonDate, setLessonDate] = useState<Date>();
@@ -184,16 +186,21 @@ export default function TutorPage() {
     if (!searchEmail.trim()) return;
     
     setSearching(true);
+    setSearchNotFound(false);
+    setSearchResult(null);
     try {
       const res = await fetch(`/api/students?email=${encodeURIComponent(searchEmail.trim())}`);
       if (res.ok) {
         const data = await res.json();
         setSearchResult(data.student);
+        setSearchNotFound(false);
       } else {
         setSearchResult(null);
+        setSearchNotFound(true);
       }
     } catch (error) {
       setSearchResult(null);
+      setSearchNotFound(true);
     } finally {
       setSearching(false);
     }
@@ -214,18 +221,21 @@ export default function TutorPage() {
         setSearchResult(null);
         setSearchEmail('');
         setManualName('');
+        setSearchNotFound(false);
         setShowAddStudent(false);
         fetchData();
       } else {
         toast.error(data.error || 'Ошибка');
       }
     } catch (error) {
+      console.error('Invite student error:', error);
       toast.error('Ошибка соединения');
     }
   };
 
-  const handleCreateManualStudent = async () => {
-    if (!manualName.trim()) {
+  const handleCreateManualStudent = async (email?: string) => {
+    const nameToUse = manualName.trim();
+    if (!nameToUse) {
       toast.error('Введите имя ученика');
       return;
     }
@@ -235,7 +245,8 @@ export default function TutorPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
-          name: manualName.trim(),
+          name: nameToUse,
+          studentEmail: email || undefined,
           createManual: true 
         })
       });
@@ -247,12 +258,14 @@ export default function TutorPage() {
         setManualName('');
         setSearchEmail('');
         setSearchResult(null);
+        setSearchNotFound(false);
         setShowAddStudent(false);
         fetchData();
       } else {
         toast.error(data.error || 'Ошибка создания');
       }
     } catch (error) {
+      console.error('Create manual student error:', error);
       toast.error('Ошибка соединения');
     }
   };
@@ -851,10 +864,14 @@ export default function TutorPage() {
                           type="email"
                           placeholder="email@example.com"
                           value={searchEmail}
-                          onChange={e => setSearchEmail(e.target.value)}
+                          onChange={e => {
+                            setSearchEmail(e.target.value);
+                            setSearchNotFound(false);
+                            setSearchResult(null);
+                          }}
                           onKeyDown={e => e.key === 'Enter' && handleSearchStudent()}
                         />
-                        <Button onClick={handleSearchStudent} disabled={searching}>
+                        <Button onClick={handleSearchStudent} disabled={searching || !searchEmail.trim()}>
                           {searching ? '...' : 'Найти'}
                         </Button>
                       </div>
@@ -887,12 +904,42 @@ export default function TutorPage() {
                       </Card>
                     )}
                     
+                    {searchNotFound && (
+                      <Card className="border-orange-200 bg-orange-50">
+                        <CardContent className="p-4">
+                          <div className="flex items-center gap-2 mb-3">
+                            <AlertCircle className="w-5 h-5 text-orange-500" />
+                            <p className="font-medium text-orange-700">Ученик не найден</p>
+                          </div>
+                          <p className="text-sm text-gray-600 mb-3">
+                            Ученик с email <strong>{searchEmail}</strong> не зарегистрирован.
+                            Вы можете создать карточку для этого ученика:
+                          </p>
+                          <div className="flex gap-2">
+                            <Input
+                              placeholder="Имя ученика"
+                              value={manualName}
+                              onChange={e => setManualName(e.target.value)}
+                              className="flex-1"
+                            />
+                            <Button 
+                              onClick={() => handleCreateManualStudent(searchEmail)}
+                              disabled={!manualName.trim()}
+                              className="bg-emerald-500 hover:bg-emerald-600"
+                            >
+                              Создать
+                            </Button>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )}
+                    
                     <div className="relative">
                       <div className="absolute inset-0 flex items-center">
                         <span className="w-full border-t" />
                       </div>
                       <div className="relative flex justify-center text-xs uppercase">
-                        <span className="bg-white px-2 text-gray-500">или</span>
+                        <span className="bg-white px-2 text-gray-500">или создайте новую карточку</span>
                       </div>
                     </div>
                     
@@ -906,10 +953,12 @@ export default function TutorPage() {
                           placeholder="Имя ученика"
                           value={manualName}
                           onChange={e => setManualName(e.target.value)}
+                          className="flex-1"
                         />
                         <Button 
-                          onClick={handleCreateManualStudent}
+                          onClick={() => handleCreateManualStudent()}
                           disabled={!manualName.trim()}
+                          className="bg-emerald-500 hover:bg-emerald-600"
                         >
                           Создать
                         </Button>

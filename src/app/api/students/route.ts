@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getCurrentUser } from '@/lib/auth';
 import { hash } from 'bcryptjs';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'crypto';
 
 // GET - Get tutor's students or student's tutors, or search for a student by email
 export async function GET(request: NextRequest) {
@@ -25,8 +25,8 @@ export async function GET(request: NextRequest) {
       const student = await db.user.findFirst({
         where: {
           OR: [
-            { email: email?.toLowerCase() },
-            { username: username?.toLowerCase() }
+            { email: email?.toLowerCase() || '' },
+            { username: username?.toLowerCase() || '' }
           ],
           role: 'STUDENT'
         },
@@ -111,7 +111,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Only tutors can add students' }, { status: 403 });
     }
 
-    const body = await request.json();
+    // Parse body safely
+    let body;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+    }
+
     const { 
       studentId,      // ID существующего ученика для приглашения
       studentEmail,   // Email для поиска
@@ -120,8 +127,12 @@ export async function POST(request: NextRequest) {
       createManual    // Флаг для ручного создания
     } = body;
 
+    console.log('POST /api/students - body:', { studentId, studentEmail, studentUsername, name, createManual });
+
     // Если указан studentId - отправляем приглашение существующему ученику
     if (studentId) {
+      console.log('Processing studentId:', studentId);
+      
       const student = await db.user.findUnique({
         where: { id: studentId, role: 'STUDENT' }
       });
@@ -147,6 +158,7 @@ export async function POST(request: NextRequest) {
         if (existingRequest.status === 'PENDING') {
           return NextResponse.json({ error: 'Invitation already sent' }, { status: 400 });
         }
+        // If declined, we can update to pending
       }
 
       // Create or update request
@@ -189,11 +201,13 @@ export async function POST(request: NextRequest) {
 
     // Поиск ученика по email/username
     if (studentEmail || studentUsername) {
+      console.log('Searching by email/username:', { studentEmail, studentUsername });
+      
       const student = await db.user.findFirst({
         where: {
           OR: [
-            { email: studentEmail?.toLowerCase() },
-            { username: studentUsername?.toLowerCase() }
+            { email: studentEmail?.toLowerCase() || '' },
+            { username: studentUsername?.toLowerCase() || '' }
           ],
           role: 'STUDENT'
         }
@@ -202,7 +216,9 @@ export async function POST(request: NextRequest) {
       if (!student) {
         // Если ученик не найден и включён флаг createManual - создаём вручную
         if (createManual && name) {
-          const randomPassword = uuidv4();
+          console.log('Creating manual student with name:', name);
+          
+          const randomPassword = randomUUID();
           const hashedPassword = await hash(randomPassword, 10);
           const randomSuffix = Math.random().toString(36).substring(2, 8);
           const manualEmail = studentEmail || `manual_${randomSuffix}@senseimath.local`;
@@ -254,7 +270,7 @@ export async function POST(request: NextRequest) {
           });
         }
 
-        return NextResponse.json({ error: 'Student not found' }, { status: 404 });
+        return NextResponse.json({ error: 'Student not found. Use createManual=true with name to create.' }, { status: 404 });
       }
 
       // Ученик найден - отправляем приглашение
@@ -315,8 +331,10 @@ export async function POST(request: NextRequest) {
 
     // Ручное создание ученика без email
     if (createManual && name) {
+      console.log('Creating manual student with name only:', name);
+      
       const randomSuffix = Math.random().toString(36).substring(2, 8);
-      const randomPassword = uuidv4();
+      const randomPassword = randomUUID();
       const hashedPassword = await hash(randomPassword, 10);
       const manualEmail = `manual_${randomSuffix}@senseimath.local`;
       const manualUsername = `student_${randomSuffix}`;
@@ -353,10 +371,17 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    return NextResponse.json({ error: 'Invalid request parameters' }, { status: 400 });
+    return NextResponse.json({ error: 'Invalid request parameters. Provide studentId, studentEmail/studentUsername, or createManual with name.' }, { status: 400 });
   } catch (error) {
     console.error('Add student error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    if (error instanceof Error) {
+      console.error('Error message:', error.message);
+      console.error('Error stack:', error.stack);
+    }
+    return NextResponse.json({ 
+      error: 'Internal server error', 
+      details: error instanceof Error ? error.message : 'Unknown error'
+    }, { status: 500 });
   }
 }
 
